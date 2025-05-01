@@ -5,6 +5,7 @@ import 'package:appflowy/startup/startup.dart';
 import 'package:appflowy/startup/tasks/app_widget.dart'; // For AppGlobals
 import 'package:appflowy/startup/tasks/deeplink/deeplink_handler.dart';
 import 'package:appflowy/workspace/application/tabs/tabs_bloc.dart';
+import 'package:appflowy/workspace/application/view/view_ext.dart';
 import 'package:appflowy/workspace/application/view/view_service.dart';
 import 'package:appflowy_backend/log.dart';
 import 'package:appflowy_backend/protobuf/flowy-error/errors.pb.dart';
@@ -74,10 +75,8 @@ class PageViewDeepLinkHandler extends DeepLinkHandler<void> {
             Log.info('PageViewDeepLinkHandler: Navigated on mobile to view: ${view.name}');
           } else {
             // Use desktop/web navigation via TabsBloc
-            // We need to access TabsBloc. Depending on how it's provided in the app,
-            // we might need to use getIt<TabsBloc>() instead if that's how it's registered
             final tabsBloc = context.read<TabsBloc>();
-            tabsBloc.add(TabsEvent.openPlugin(view: view));
+            tabsBloc.add(TabsEvent.openPlugin(plugin: view.plugin(), view: view));
             Log.info('PageViewDeepLinkHandler: Navigated on desktop to view: ${view.name}');
           }
           
