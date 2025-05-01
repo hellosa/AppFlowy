@@ -59,25 +59,33 @@ class PageViewDeepLinkHandler extends DeepLinkHandler<void> {
       (ViewPB view) async {
         Log.info('PageViewDeepLinkHandler: Found view: ${view.name}');
         
-        // Navigate to the view
-        final context = AppGlobals.rootNavKey.currentContext;
-        if (context == null) {
-          final error = FlowyError(msg: 'Root context not available for navigation');
-          Log.error('PageViewDeepLinkHandler: ${error.msg}');
-          onStateChange(this, DeepLinkState.finish);
-          return FlowyResult.failure(error);
-        }
-
         try {
           if (UniversalPlatform.isMobile) {
+            // For mobile, we still need the context for navigation
+            final context = AppGlobals.rootNavKey.currentContext;
+            if (context == null) {
+              final error = FlowyError(msg: 'Root context not available for mobile navigation');
+              Log.error('PageViewDeepLinkHandler: ${error.msg}');
+              onStateChange(this, DeepLinkState.finish);
+              return FlowyResult.failure(error);
+            }
+            
             // Use mobile navigation
             await context.pushView(view);
             Log.info('PageViewDeepLinkHandler: Navigated on mobile to view: ${view.name}');
           } else {
-            // Use desktop/web navigation via TabsBloc
-            final tabsBloc = context.read<TabsBloc>();
-            tabsBloc.add(TabsEvent.openPlugin(plugin: view.plugin(), view: view));
-            Log.info('PageViewDeepLinkHandler: Navigated on desktop to view: ${view.name}');
+            // For desktop/web, use getIt to access TabsBloc directly
+            // No need for BuildContext in this case
+            try {
+              final tabsBloc = getIt<TabsBloc>();
+              tabsBloc.add(TabsEvent.openPlugin(plugin: view.plugin(), view: view));
+              Log.info('PageViewDeepLinkHandler: Navigated on desktop to view: ${view.name}');
+            } catch (e) {
+              final error = FlowyError(msg: 'Failed to get TabsBloc: $e');
+              Log.error('PageViewDeepLinkHandler: ${error.msg}');
+              onStateChange(this, DeepLinkState.finish);
+              return FlowyResult.failure(error);
+            }
           }
           
           onStateChange(this, DeepLinkState.finish);
