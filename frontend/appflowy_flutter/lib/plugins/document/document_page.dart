@@ -29,6 +29,7 @@ import 'package:provider/provider.dart';
 import 'package:universal_platform/universal_platform.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:intl/intl.dart';
 
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
@@ -232,8 +233,6 @@ class _DocumentPageState extends State<DocumentPage>
             if (state.isDeleted && UniversalPlatform.isDesktop)
               buildBanner(context),
             Expanded(child: child),
-            // Add a report changes button at the bottom
-            _buildReportChangesButton(context),
           ],
         ),
       ),
@@ -268,16 +267,164 @@ class _DocumentPageState extends State<DocumentPage>
     }
 
     final page = editorState.document.root;
-    return DocumentCoverWidget(
-      node: page,
-      tabs: widget.tabs,
-      editorState: editorState,
-      view: widget.view,
-      onIconChanged: (icon) async => ViewBackendService.updateViewIcon(
-        view: widget.view,
-        viewIcon: icon,
+    return Column(
+      children: [
+        DocumentCoverWidget(
+          node: page,
+          tabs: widget.tabs,
+          editorState: editorState,
+          view: widget.view,
+          onIconChanged: (icon) async => ViewBackendService.updateViewIcon(
+            view: widget.view,
+            viewIcon: icon,
+          ),
+        ),
+        _buildReportChangesButton(context),
+      ],
+    );
+  }
+
+  Widget _buildReportChangesButton(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 20.0),
+      alignment: Alignment.centerRight,
+      child: ElevatedButton(
+        onPressed: () => _showReportChangesDialog(context),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+          minimumSize: const Size(100, 32),
+        ),
+        child: const Text('Report Changes'),
       ),
     );
+  }
+
+  void _showReportChangesDialog(BuildContext context) async {
+    final TextEditingController changesController = TextEditingController();
+    final TextEditingController notifyPeopleController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Report Document Changes'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: changesController,
+                decoration: const InputDecoration(
+                  labelText: 'Changes Made',
+                  hintText: 'Describe the changes you made',
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: notifyPeopleController,
+                decoration: const InputDecoration(
+                  labelText: 'People to Notify (Optional)',
+                  hintText: 'Enter names of people to notify',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Get the workspace ID from the current workspace
+                final workspaceResult = await ViewBackendService.getCurrentWorkspace();
+                final workspaceId = workspaceResult.fold(
+                  (workspace) => workspace.id,
+                  (_) => '',
+                );
+                
+                _sendChangesToWeChat(
+                  changes: changesController.text,
+                  notifyPeople: notifyPeopleController.text,
+                  documentName: widget.view.nameOrDefault,
+                  workspaceId: workspaceId,
+                  viewId: widget.view.id,
+                );
+                Navigator.of(context).pop();
+                
+                // Show confirmation
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Changes reported successfully'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: const Text('Submit'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _sendChangesToWeChat({
+    required String changes,
+    required String notifyPeople,
+    required String documentName,
+    required String workspaceId,
+    required String viewId,
+  }) async {
+    try {
+      // WeChat webhook URL - replace with your actual webhook URL
+      const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=f40546b0-859c-42d5-948e-31c48d8ae2f9';
+      
+      // Format current time
+      final now = DateTime.now();
+      final formattedTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+      
+      // Get current user name from userProfilePB in DocumentState
+      final userProfile = context.read<DocumentBloc>().state.userProfilePB;
+      final editorName = userProfile != null ? userProfile.name : "Unknown User";
+      
+      // Generate app and web links
+      final appDocsUrl = 'appflowy-flutter://page-view?workspace_id=$workspaceId&view_id=$viewId';
+      final webDocsUrl = 'https://docs.uneedx.com/app/$workspaceId/$viewId';
+      
+      // Prepare message content in Markdown format
+      final markdownContent = '''
+#### 有人修改了文档
+> **文档标题：** $documentName
+> **修改时间：** $formattedTime
+> **修改者：** $editorName
+> **APP 链接：** [点击查看]($appDocsUrl)
+> **WEB 链接：** [点击查看]($webDocsUrl)
+
+**修改内容：** $changes
+${notifyPeople.isNotEmpty ? '**需要通知：** $notifyPeople' : ''}
+''';
+      
+      // Prepare message content
+      final message = {
+        'msgtype': 'markdown',
+        'markdown': {
+          'content': markdownContent,
+        }
+      };
+      
+      // Send POST request
+      final response = await http.post(
+        Uri.parse(webhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(message),
+      );
+      
+      if (response.statusCode != 200) {
+        Log.error('Failed to send notification: ${response.body}');
+      }
+    } catch (e) {
+      Log.error('Error sending notification: $e');
+    }
   }
 
   void onNotificationAction(
@@ -385,111 +532,5 @@ class _DocumentPageState extends State<DocumentPage>
     }
 
     return null;
-  }
-
-  Widget _buildReportChangesButton(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 20.0),
-      child: ElevatedButton(
-        onPressed: () => _showReportChangesDialog(context),
-        child: const Text('Report Changes'),
-      ),
-    );
-  }
-
-  void _showReportChangesDialog(BuildContext context) {
-    final TextEditingController changesController = TextEditingController();
-    final TextEditingController notifyPeopleController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Report Document Changes'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: changesController,
-                decoration: const InputDecoration(
-                  labelText: 'Changes Made',
-                  hintText: 'Describe the changes you made',
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: notifyPeopleController,
-                decoration: const InputDecoration(
-                  labelText: 'People to Notify (Optional)',
-                  hintText: 'Enter names of people to notify',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                _sendChangesToWeChat(
-                  changes: changesController.text,
-                  notifyPeople: notifyPeopleController.text,
-                  documentName: widget.view.nameOrDefault,
-                );
-                Navigator.of(context).pop();
-                
-                // Show confirmation
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Changes reported successfully'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              },
-              child: const Text('Submit'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _sendChangesToWeChat({
-    required String changes,
-    required String notifyPeople,
-    required String documentName,
-  }) async {
-    try {
-      // WeChat webhook URL - replace with your actual webhook URL
-      const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=f40546b0-859c-42d5-948e-31c48d8ae2f9';
-      
-      // Prepare message content
-      final message = {
-        'msgtype': 'text',
-        'text': {
-          'content': '''
-Document: $documentName
-Changes: $changes
-${notifyPeople.isNotEmpty ? 'To notify: $notifyPeople' : ''}
-''',
-        }
-      };
-      
-      // Send POST request
-      final response = await http.post(
-        Uri.parse(webhookUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(message),
-      );
-      
-      if (response.statusCode != 200) {
-        Log.error('Failed to send notification: ${response.body}');
-      }
-    } catch (e) {
-      Log.error('Error sending notification: $e');
-    }
   }
 }
