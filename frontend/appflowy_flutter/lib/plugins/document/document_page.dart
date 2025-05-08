@@ -30,6 +30,7 @@ import 'package:universal_platform/universal_platform.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:appflowy_backend/user_backend_service.dart';
 
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
@@ -337,7 +338,7 @@ class _DocumentPageState extends State<DocumentPage>
             TextButton(
               onPressed: () async {
                 // Get the workspace ID from the current workspace
-                final workspaceResult = await ViewBackendService.getCurrentWorkspace();
+                final workspaceResult = await UserBackendService.getCurrentWorkspace();
                 final workspaceId = workspaceResult.fold(
                   (workspace) => workspace.id,
                   (_) => '',
