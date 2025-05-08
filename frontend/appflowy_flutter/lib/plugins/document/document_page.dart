@@ -337,29 +337,58 @@ class _DocumentPageState extends State<DocumentPage>
             ),
             TextButton(
               onPressed: () async {
-                // Get the workspace ID from the current workspace
-                final workspaceResult = await UserBackendService.getCurrentWorkspace();
-                final workspaceId = workspaceResult.fold(
-                  (workspace) => workspace.id,
-                  (_) => '',
-                );
-                
-                _sendChangesToWeChat(
-                  changes: changesController.text,
-                  notifyPeople: notifyPeopleController.text,
-                  documentName: widget.view.nameOrDefault,
-                  workspaceId: workspaceId,
-                  viewId: widget.view.id,
-                );
-                Navigator.of(context).pop();
-                
-                // Show confirmation
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Changes reported successfully'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
+                Log.info("[ReportChanges] Submit button clicked");
+                try {
+                  // Get the workspace ID from the current workspace
+                  Log.info("[ReportChanges] Retrieving current workspace");
+                  final workspaceResult = await UserBackendService.getCurrentWorkspace();
+                  
+                  Log.info("[ReportChanges] Workspace result: ${workspaceResult.isSuccess ? 'Success' : 'Failed'}");
+                  final workspaceId = workspaceResult.fold(
+                    (workspace) {
+                      Log.info("[ReportChanges] Got workspace ID: ${workspace.id}");
+                      return workspace.id;
+                    },
+                    (error) {
+                      Log.error("[ReportChanges] Failed to get workspace: $error");
+                      return '';
+                    },
+                  );
+                  
+                  final changes = changesController.text;
+                  final notifyPeople = notifyPeopleController.text;
+                  Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
+                  
+                  Log.info("[ReportChanges] About to send to WeChat webhook");
+                  await _sendChangesToWeChat(
+                    changes: changes,
+                    notifyPeople: notifyPeople,
+                    documentName: widget.view.nameOrDefault,
+                    workspaceId: workspaceId,
+                    viewId: widget.view.id,
+                  );
+                  
+                  Log.info("[ReportChanges] Webhook call completed");
+                  Navigator.of(context).pop();
+                  
+                  // Show confirmation
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Changes reported successfully'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                  Log.info("[ReportChanges] Dialog completed successfully");
+                } catch (e) {
+                  Log.error("[ReportChanges] Error in submit button handler: $e");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error reporting changes: $e'),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
               },
               child: const Text('Submit'),
             ),
@@ -377,20 +406,24 @@ class _DocumentPageState extends State<DocumentPage>
     required String viewId,
   }) async {
     try {
+      Log.info("[ReportChanges] Starting webhook send process");
       // WeChat webhook URL - replace with your actual webhook URL
       const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=f40546b0-859c-42d5-948e-31c48d8ae2f9';
       
       // Format current time
       final now = DateTime.now();
       final formattedTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+      Log.info("[ReportChanges] Formatted time: $formattedTime");
       
       // Get current user name from userProfilePB in DocumentState
       final userProfile = context.read<DocumentBloc>().state.userProfilePB;
       final editorName = userProfile != null ? userProfile.name : "Unknown User";
+      Log.info("[ReportChanges] Editor name: $editorName");
       
       // Generate app and web links
       final appDocsUrl = 'appflowy-flutter://page-view?workspace_id=$workspaceId&view_id=$viewId';
       final webDocsUrl = 'https://docs.uneedx.com/app/$workspaceId/$viewId';
+      Log.info("[ReportChanges] URLs: app=$appDocsUrl, web=$webDocsUrl");
       
       // Prepare message content in Markdown format
       final markdownContent = '''
@@ -413,6 +446,7 @@ ${notifyPeople.isNotEmpty ? '**需要通知：** $notifyPeople' : ''}
         }
       };
       
+      Log.info("[ReportChanges] Sending HTTP POST request to webhook");
       // Send POST request
       final response = await http.post(
         Uri.parse(webhookUrl),
@@ -420,11 +454,18 @@ ${notifyPeople.isNotEmpty ? '**需要通知：** $notifyPeople' : ''}
         body: jsonEncode(message),
       );
       
+      Log.info("[ReportChanges] HTTP response status: ${response.statusCode}");
+      Log.info("[ReportChanges] HTTP response body: ${response.body}");
+      
       if (response.statusCode != 200) {
         Log.error('Failed to send notification: ${response.body}');
+      } else {
+        Log.info("[ReportChanges] Successfully sent notification");
       }
     } catch (e) {
-      Log.error('Error sending notification: $e');
+      Log.error("[ReportChanges] Error sending notification: $e");
+      // 重新抛出异常，以便上层处理
+      rethrow;
     }
   }
 
