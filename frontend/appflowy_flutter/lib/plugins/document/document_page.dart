@@ -416,7 +416,7 @@ class _DocumentPageState extends State<DocumentPage>
       Log.info("[ReportChanges] Formatted time: $formattedTime");
       
       // Get current user name from userProfilePB in DocumentState
-      final userProfile = context.read<DocumentBloc>().state.userProfilePB;
+      final userProfile = documentBloc.state.userProfilePB;
       final editorName = userProfile != null ? userProfile.name : "Unknown User";
       Log.info("[ReportChanges] Editor name: $editorName");
       
