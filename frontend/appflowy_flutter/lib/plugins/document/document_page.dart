@@ -19,6 +19,7 @@ import 'package:appflowy/workspace/application/action_navigation/navigation_acti
 import 'package:appflowy/workspace/application/view/prelude.dart';
 import 'package:appflowy/workspace/application/view/view_ext.dart';
 import 'package:appflowy/workspace/application/view/view_lock_status_bloc.dart';
+import 'package:appflowy/user/application/user_service.dart';
 import 'package:appflowy_backend/log.dart';
 import 'package:appflowy_backend/protobuf/flowy-folder/view.pb.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
@@ -30,7 +31,6 @@ import 'package:universal_platform/universal_platform.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:appflowy_backend/user_backend_service.dart';
 
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
