@@ -408,7 +408,7 @@ class _DocumentPageState extends State<DocumentPage>
     try {
       Log.info("[ReportChanges] Starting webhook send process");
       // WeChat webhook URL - replace with your actual webhook URL
-      const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=f40546b0-859c-42d5-948e-31c48d8ae2f9';
+      const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=3950f1b7-fff4-4a9d-b82a-24cc2a7e579b';
       
       // Format current time
       final now = DateTime.now();
