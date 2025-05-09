@@ -307,9 +307,6 @@ class _DocumentPageState extends State<DocumentPage>
   void _showReportChangesDialog(BuildContext context) async {
     final TextEditingController changesController = TextEditingController();
     final TextEditingController notifyPeopleController = TextEditingController();
-    final List<WorkspaceMemberPB> members = [];
-    final List<String> selectedMemberEmails = [];
-    bool isLoading = true;
     
     // Get current workspace ID
     final workspaceResult = await UserBackendService.getCurrentWorkspace();
@@ -321,156 +318,79 @@ class _DocumentPageState extends State<DocumentPage>
       },
     );
     
-    if (workspaceId.isNotEmpty) {
-      // Get workspace members using dispatch directly
-      try {
-        final data = QueryWorkspacePB()..workspaceId = workspaceId;
-        final membersResult = await UserEventGetWorkspaceMembers(data).send();
-        membersResult.fold(
-          (membersList) {
-            members.addAll(membersList.items);
-            isLoading = false;
-          },
-          (error) {
-            Log.error("[ReportChanges] Failed to get workspace members: $error");
-            isLoading = false;
-          }
-        );
-      } catch (e) {
-        Log.error("[ReportChanges] Error getting workspace members: $e");
-        isLoading = false;
-      }
-    } else {
-      isLoading = false;
-    }
-    
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Report Document Changes'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: changesController,
-                      decoration: const InputDecoration(
-                        labelText: 'Changes Made',
-                        hintText: 'Describe the changes you made',
-                      ),
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('People to Notify:'),
-                    const SizedBox(height: 8),
-                    if (isLoading)
-                      const CircularProgressIndicator.adaptive()
-                    else if (members.isEmpty)
-                      const Text('No workspace members found.', 
-                        style: TextStyle(fontStyle: FontStyle.italic))
-                    else
-                      Container(
-                        height: 200,
-                        width: double.maxFinite,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: ListView.builder(
-                          itemCount: members.length,
-                          itemBuilder: (context, index) {
-                            final member = members[index];
-                            final isSelected = selectedMemberEmails.contains(member.email);
-                            
-                            return CheckboxListTile(
-                              title: Text(member.email),
-                              value: isSelected,
-                              onChanged: (bool? value) {
-                                setState(() {
-                                  if (value == true) {
-                                    selectedMemberEmails.add(member.email);
-                                  } else {
-                                    selectedMemberEmails.remove(member.email);
-                                  }
-                                });
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    if (selectedMemberEmails.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: selectedMemberEmails.map((email) {
-                          return Chip(
-                            label: Text(email),
-                            onDeleted: () {
-                              setState(() {
-                                selectedMemberEmails.remove(email);
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                  ],
+        return AlertDialog(
+          title: const Text('Report Document Changes'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: changesController,
+                decoration: const InputDecoration(
+                  labelText: 'Changes Made',
+                  hintText: 'Describe the changes you made',
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: notifyPeopleController,
+                decoration: const InputDecoration(
+                  labelText: 'People to Notify (Optional)',
+                  hintText: 'Enter names or emails separated by commas',
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    Log.info("[ReportChanges] Submit button clicked");
-                    try {
-                      final changes = changesController.text;
-                      final notifyPeople = selectedMemberEmails.join(', ');
-                      Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
-                      
-                      Log.info("[ReportChanges] About to send to WeChat webhook");
-                      await _sendChangesToWeChat(
-                        changes: changes,
-                        notifyPeople: notifyPeople,
-                        documentName: widget.view.nameOrDefault,
-                        workspaceId: workspaceId,
-                        viewId: widget.view.id,
-                      );
-                      
-                      Log.info("[ReportChanges] Webhook call completed");
-                      Navigator.of(context).pop();
-                      
-                      // Show confirmation
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Changes reported successfully'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                      Log.info("[ReportChanges] Dialog completed successfully");
-                    } catch (e) {
-                      Log.error("[ReportChanges] Error in submit button handler: $e");
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Error reporting changes: $e'),
-                          backgroundColor: Colors.red,
-                          duration: const Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text('Submit'),
-                ),
-              ],
-            );
-          }
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Log.info("[ReportChanges] Submit button clicked");
+                try {
+                  final changes = changesController.text;
+                  final notifyPeople = notifyPeopleController.text;
+                  Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
+                  
+                  Log.info("[ReportChanges] About to send to WeChat webhook");
+                  await _sendChangesToWeChat(
+                    changes: changes,
+                    notifyPeople: notifyPeople,
+                    documentName: widget.view.nameOrDefault,
+                    workspaceId: workspaceId,
+                    viewId: widget.view.id,
+                  );
+                  
+                  Log.info("[ReportChanges] Webhook call completed");
+                  Navigator.of(context).pop();
+                  
+                  // Show confirmation
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Changes reported successfully'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                  Log.info("[ReportChanges] Dialog completed successfully");
+                } catch (e) {
+                  Log.error("[ReportChanges] Error in submit button handler: $e");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error reporting changes: $e'),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Submit'),
+            ),
+          ],
         );
       },
     );
