@@ -14,12 +14,14 @@ import 'package:appflowy/plugins/document/presentation/editor_style.dart';
 import 'package:appflowy/shared/flowy_error_page.dart';
 import 'package:appflowy/shared/icon_emoji_picker/tab.dart';
 import 'package:appflowy/startup/startup.dart';
+import 'package:appflowy/user/application/auth/auth_service.dart';
 import 'package:appflowy/workspace/application/action_navigation/action_navigation_bloc.dart';
 import 'package:appflowy/workspace/application/action_navigation/navigation_action.dart';
 import 'package:appflowy/workspace/application/view/prelude.dart';
 import 'package:appflowy/workspace/application/view/view_ext.dart';
 import 'package:appflowy/workspace/application/view/view_lock_status_bloc.dart';
 import 'package:appflowy/user/application/user_service.dart';
+import 'package:appflowy_backend/dispatch/dispatch.dart';
 import 'package:appflowy_backend/log.dart';
 import 'package:appflowy_backend/protobuf/flowy-folder/view.pb.dart';
 import 'package:appflowy_backend/protobuf/flowy-user/protobuf.dart';
@@ -32,7 +34,7 @@ import 'package:universal_platform/universal_platform.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:multi_select_flutter/multi_select_flutter.dart';
+import 'package:fixnum/fixnum.dart';
 
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
@@ -304,8 +306,9 @@ class _DocumentPageState extends State<DocumentPage>
 
   void _showReportChangesDialog(BuildContext context) async {
     final TextEditingController changesController = TextEditingController();
+    final TextEditingController notifyPeopleController = TextEditingController();
     final List<WorkspaceMemberPB> members = [];
-    final List<WorkspaceMemberPB> selectedMembers = [];
+    final List<String> selectedMemberEmails = [];
     bool isLoading = true;
     
     // Get current workspace ID
@@ -319,18 +322,24 @@ class _DocumentPageState extends State<DocumentPage>
     );
     
     if (workspaceId.isNotEmpty) {
-      // Get workspace members
-      final membersResult = await UserBackendService().getWorkspaceMembers(workspaceId);
-      membersResult.fold(
-        (membersList) {
-          members.addAll(membersList.items);
-          isLoading = false;
-        },
-        (error) {
-          Log.error("[ReportChanges] Failed to get workspace members: $error");
-          isLoading = false;
-        }
-      );
+      // Get workspace members using dispatch directly
+      try {
+        final data = QueryWorkspacePB()..workspaceId = workspaceId;
+        final membersResult = await UserEventGetWorkspaceMembers(data).send();
+        membersResult.fold(
+          (membersList) {
+            members.addAll(membersList.items);
+            isLoading = false;
+          },
+          (error) {
+            Log.error("[ReportChanges] Failed to get workspace members: $error");
+            isLoading = false;
+          }
+        );
+      } catch (e) {
+        Log.error("[ReportChanges] Error getting workspace members: $e");
+        isLoading = false;
+      }
     } else {
       isLoading = false;
     }
@@ -342,46 +351,76 @@ class _DocumentPageState extends State<DocumentPage>
           builder: (context, setState) {
             return AlertDialog(
               title: const Text('Report Document Changes'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: changesController,
-                    decoration: const InputDecoration(
-                      labelText: 'Changes Made',
-                      hintText: 'Describe the changes you made',
-                    ),
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: 16),
-                  if (isLoading)
-                    const CircularProgressIndicator.adaptive()
-                  else if (members.isEmpty)
-                    const Text('No workspace members found.', style: TextStyle(fontStyle: FontStyle.italic))
-                  else
-                    MultiSelectDialogField<WorkspaceMemberPB>(
-                      title: const Text('People to Notify'),
-                      buttonText: const Text('Select members'),
-                      items: members
-                          .map((member) => MultiSelectItem<WorkspaceMemberPB>(
-                              member, member.email))
-                          .toList(),
-                      listType: MultiSelectListType.CHIP,
-                      onConfirm: (values) {
-                        setState(() {
-                          selectedMembers.clear();
-                          selectedMembers.addAll(values);
-                        });
-                      },
-                      chipDisplay: MultiSelectChipDisplay(
-                        onTap: (item) {
-                          setState(() {
-                            selectedMembers.remove(item);
-                          });
-                        },
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: changesController,
+                      decoration: const InputDecoration(
+                        labelText: 'Changes Made',
+                        hintText: 'Describe the changes you made',
                       ),
+                      maxLines: 3,
                     ),
-                ],
+                    const SizedBox(height: 16),
+                    const Text('People to Notify:'),
+                    const SizedBox(height: 8),
+                    if (isLoading)
+                      const CircularProgressIndicator.adaptive()
+                    else if (members.isEmpty)
+                      const Text('No workspace members found.', 
+                        style: TextStyle(fontStyle: FontStyle.italic))
+                    else
+                      Container(
+                        height: 200,
+                        width: double.maxFinite,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: ListView.builder(
+                          itemCount: members.length,
+                          itemBuilder: (context, index) {
+                            final member = members[index];
+                            final isSelected = selectedMemberEmails.contains(member.email);
+                            
+                            return CheckboxListTile(
+                              title: Text(member.email),
+                              value: isSelected,
+                              onChanged: (bool? value) {
+                                setState(() {
+                                  if (value == true) {
+                                    selectedMemberEmails.add(member.email);
+                                  } else {
+                                    selectedMemberEmails.remove(member.email);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    if (selectedMemberEmails.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: selectedMemberEmails.map((email) {
+                          return Chip(
+                            label: Text(email),
+                            onDeleted: () {
+                              setState(() {
+                                selectedMemberEmails.remove(email);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -393,7 +432,7 @@ class _DocumentPageState extends State<DocumentPage>
                     Log.info("[ReportChanges] Submit button clicked");
                     try {
                       final changes = changesController.text;
-                      final notifyPeople = selectedMembers.map((m) => m.email).join(', ');
+                      final notifyPeople = selectedMemberEmails.join(', ');
                       Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
                       
                       Log.info("[ReportChanges] About to send to WeChat webhook");
