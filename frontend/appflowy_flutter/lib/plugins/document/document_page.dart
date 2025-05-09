@@ -306,7 +306,9 @@ class _DocumentPageState extends State<DocumentPage>
 
   void _showReportChangesDialog(BuildContext context) async {
     final TextEditingController changesController = TextEditingController();
-    final TextEditingController notifyPeopleController = TextEditingController();
+    final List<WorkspaceMemberPB> members = [];
+    final List<String> selectedMemberEmails = [];
+    bool isLoading = true;
     
     // Get current workspace ID
     final workspaceResult = await UserBackendService.getCurrentWorkspace();
@@ -318,79 +320,166 @@ class _DocumentPageState extends State<DocumentPage>
       },
     );
     
+    // Try a different approach - use UserEventGetWorkspaceMembers directly
+    if (workspaceId.isNotEmpty) {
+      try {
+        Log.info("[ReportChanges] Fetching workspace members using UserEventGetWorkspaceMembers");
+        final data = QueryWorkspacePB()..workspaceId = workspaceId;
+        final membersResult = await UserEventGetWorkspaceMembers(data).send();
+        membersResult.fold(
+          (membersList) {
+            members.addAll(membersList.items);
+            Log.info("[ReportChanges] Successfully fetched ${members.length} workspace members");
+            isLoading = false;
+          },
+          (error) {
+            Log.error("[ReportChanges] Failed to get workspace members: $error");
+            isLoading = false;
+          }
+        );
+      } catch (e) {
+        Log.error("[ReportChanges] Error getting workspace members: $e");
+        isLoading = false;
+      }
+    } else {
+      isLoading = false;
+    }
+    
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Report Document Changes'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: changesController,
-                decoration: const InputDecoration(
-                  labelText: 'Changes Made',
-                  hintText: 'Describe the changes you made',
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: notifyPeopleController,
-                decoration: const InputDecoration(
-                  labelText: 'People to Notify (Optional)',
-                  hintText: 'Enter names or emails separated by commas',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Log.info("[ReportChanges] Submit button clicked");
-                try {
-                  final changes = changesController.text;
-                  final notifyPeople = notifyPeopleController.text;
-                  Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
-                  
-                  Log.info("[ReportChanges] About to send to WeChat webhook");
-                  await _sendChangesToWeChat(
-                    changes: changes,
-                    notifyPeople: notifyPeople,
-                    documentName: widget.view.nameOrDefault,
-                    workspaceId: workspaceId,
-                    viewId: widget.view.id,
-                  );
-                  
-                  Log.info("[ReportChanges] Webhook call completed");
-                  Navigator.of(context).pop();
-                  
-                  // Show confirmation
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Changes reported successfully'),
-                      duration: Duration(seconds: 2),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Report Document Changes'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: changesController,
+                      decoration: const InputDecoration(
+                        labelText: 'Changes Made',
+                        hintText: 'Describe the changes you made',
+                      ),
+                      maxLines: 3,
                     ),
-                  );
-                  Log.info("[ReportChanges] Dialog completed successfully");
-                } catch (e) {
-                  Log.error("[ReportChanges] Error in submit button handler: $e");
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error reporting changes: $e'),
-                      backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Submit'),
-            ),
-          ],
+                    const SizedBox(height: 16),
+                    const Text('People to Notify:'),
+                    const SizedBox(height: 8),
+                    if (isLoading)
+                      const Center(child: CircularProgressIndicator.adaptive())
+                    else if (members.isEmpty)
+                      const Text('No workspace members found.',
+                        style: TextStyle(fontStyle: FontStyle.italic))
+                    else
+                      Container(
+                        height: 200,
+                        width: double.maxFinite,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: ListView.builder(
+                          itemCount: members.length,
+                          itemBuilder: (context, index) {
+                            final member = members[index];
+                            final isSelected = selectedMemberEmails.contains(member.email);
+                            
+                            return CheckboxListTile(
+                              title: Text(member.name),
+                              subtitle: Text(member.email),
+                              value: isSelected,
+                              onChanged: (bool? value) {
+                                setState(() {
+                                  if (value == true) {
+                                    selectedMemberEmails.add(member.email);
+                                  } else {
+                                    selectedMemberEmails.remove(member.email);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    if (selectedMemberEmails.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: selectedMemberEmails.map((email) {
+                          final memberName = members
+                              .firstWhere((m) => m.email == email, orElse: () => WorkspaceMemberPB())
+                              .name;
+                          final displayText = memberName.isNotEmpty
+                              ? '$memberName ($email)'
+                              : email;
+                          
+                          return Chip(
+                            label: Text(displayText),
+                            onDeleted: () {
+                              setState(() {
+                                selectedMemberEmails.remove(email);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Log.info("[ReportChanges] Submit button clicked");
+                    try {
+                      final changes = changesController.text;
+                      final notifyPeople = selectedMemberEmails.join(', ');
+                      Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
+                      
+                      Log.info("[ReportChanges] About to send to WeChat webhook");
+                      await _sendChangesToWeChat(
+                        changes: changes,
+                        notifyPeople: notifyPeople,
+                        documentName: widget.view.nameOrDefault,
+                        workspaceId: workspaceId,
+                        viewId: widget.view.id,
+                      );
+                      
+                      Log.info("[ReportChanges] Webhook call completed");
+                      Navigator.of(context).pop();
+                      
+                      // Show confirmation
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Changes reported successfully'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                      Log.info("[ReportChanges] Dialog completed successfully");
+                    } catch (e) {
+                      Log.error("[ReportChanges] Error in submit button handler: $e");
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error reporting changes: $e'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          }
         );
       },
     );
