@@ -15,18 +15,26 @@ import 'package:appflowy/plugins/document/presentation/editor_style.dart';
 import 'package:appflowy/shared/flowy_error_page.dart';
 import 'package:appflowy/shared/icon_emoji_picker/tab.dart';
 import 'package:appflowy/startup/startup.dart';
+import 'package:appflowy/user/application/auth/auth_service.dart';
 import 'package:appflowy/workspace/application/action_navigation/action_navigation_bloc.dart';
 import 'package:appflowy/workspace/application/action_navigation/navigation_action.dart';
 import 'package:appflowy/workspace/application/view/prelude.dart';
 import 'package:appflowy/workspace/application/view/view_ext.dart';
+import 'package:appflowy/user/application/user_service.dart';
+import 'package:appflowy_backend/dispatch/dispatch.dart';
 import 'package:appflowy_backend/log.dart';
 import 'package:appflowy_backend/protobuf/flowy-folder/view.pb.dart';
+import 'package:appflowy_backend/protobuf/flowy-user/protobuf.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:universal_platform/universal_platform.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:intl/intl.dart';
+import 'package:fixnum/fixnum.dart';
 
 class DocumentPage extends StatefulWidget {
   const DocumentPage({
@@ -265,16 +273,288 @@ class _DocumentPageState extends State<DocumentPage>
     }
 
     final page = editorState.document.root;
-    return DocumentCoverWidget(
-      node: page,
-      tabs: widget.tabs,
-      editorState: editorState,
-      view: widget.view,
-      onIconChanged: (icon) async => ViewBackendService.updateViewIcon(
-        view: widget.view,
-        viewIcon: icon,
+    return Column(
+      children: [
+        DocumentCoverWidget(
+          node: page,
+          tabs: widget.tabs,
+          editorState: editorState,
+          view: widget.view,
+          onIconChanged: (icon) async => ViewBackendService.updateViewIcon(
+            view: widget.view,
+            viewIcon: icon,
+          ),
+        ),
+        _buildReportChangesButton(context),
+      ],
+    );
+  }
+
+  Widget _buildReportChangesButton(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 20.0),
+      alignment: Alignment.centerRight,
+      child: ElevatedButton(
+        onPressed: () => _showReportChangesDialog(context),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+          minimumSize: const Size(100, 32),
+        ),
+        child: const Text('Report Changes'),
       ),
     );
+  }
+
+  void _showReportChangesDialog(BuildContext context) async {
+    final TextEditingController changesController = TextEditingController();
+    final List<WorkspaceMemberPB> members = [];
+    final List<String> selectedMemberEmails = [];
+    bool isLoading = true;
+    
+    // Get current workspace ID
+    final workspaceResult = await UserBackendService.getCurrentWorkspace();
+    final workspaceId = workspaceResult.fold(
+      (workspace) => workspace.id,
+      (error) {
+        Log.error("[ReportChanges] Failed to get workspace: $error");
+        return '';
+      },
+    );
+    
+    // Try a different approach - use UserEventGetWorkspaceMembers directly
+    if (workspaceId.isNotEmpty) {
+      try {
+        Log.info("[ReportChanges] Fetching workspace members using UserEventGetWorkspaceMembers");
+        final data = QueryWorkspacePB()..workspaceId = workspaceId;
+        final membersResult = await UserEventGetWorkspaceMembers(data).send();
+        membersResult.fold(
+          (membersList) {
+            members.addAll(membersList.items);
+            Log.info("[ReportChanges] Successfully fetched ${members.length} workspace members");
+            isLoading = false;
+          },
+          (error) {
+            Log.error("[ReportChanges] Failed to get workspace members: $error");
+            isLoading = false;
+          }
+        );
+      } catch (e) {
+        Log.error("[ReportChanges] Error getting workspace members: $e");
+        isLoading = false;
+      }
+    } else {
+      isLoading = false;
+    }
+    
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Report Document Changes'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: changesController,
+                      decoration: const InputDecoration(
+                        labelText: 'Changes Made',
+                        hintText: 'Describe the changes you made',
+                      ),
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('People to Notify:'),
+                    const SizedBox(height: 8),
+                    if (isLoading)
+                      const Center(child: CircularProgressIndicator.adaptive())
+                    else if (members.isEmpty)
+                      const Text('No workspace members found.',
+                        style: TextStyle(fontStyle: FontStyle.italic))
+                    else
+                      Container(
+                        height: 200,
+                        width: double.maxFinite,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: ListView.builder(
+                          itemCount: members.length,
+                          itemBuilder: (context, index) {
+                            final member = members[index];
+                            final isSelected = selectedMemberEmails.contains(member.email);
+                            
+                            return CheckboxListTile(
+                              title: Text(member.name),
+                              subtitle: Text(member.email),
+                              value: isSelected,
+                              onChanged: (bool? value) {
+                                setState(() {
+                                  if (value == true) {
+                                    selectedMemberEmails.add(member.email);
+                                  } else {
+                                    selectedMemberEmails.remove(member.email);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    if (selectedMemberEmails.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: selectedMemberEmails.map((email) {
+                          final memberName = members
+                              .firstWhere((m) => m.email == email, orElse: () => WorkspaceMemberPB())
+                              .name;
+                          final displayText = memberName.isNotEmpty
+                              ? '$memberName ($email)'
+                              : email;
+                          
+                          return Chip(
+                            label: Text(displayText),
+                            onDeleted: () {
+                              setState(() {
+                                selectedMemberEmails.remove(email);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Log.info("[ReportChanges] Submit button clicked");
+                    try {
+                      final changes = changesController.text;
+                      final notifyPeople = selectedMemberEmails.join(', ');
+                      Log.info("[ReportChanges] Changes: $changes, Notify: $notifyPeople");
+                      
+                      Log.info("[ReportChanges] About to send to WeChat webhook");
+                      await _sendChangesToWeChat(
+                        changes: changes,
+                        notifyPeople: notifyPeople,
+                        documentName: widget.view.nameOrDefault,
+                        workspaceId: workspaceId,
+                        viewId: widget.view.id,
+                      );
+                      
+                      Log.info("[ReportChanges] Webhook call completed");
+                      Navigator.of(context).pop();
+                      
+                      // Show confirmation
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Changes reported successfully'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                      Log.info("[ReportChanges] Dialog completed successfully");
+                    } catch (e) {
+                      Log.error("[ReportChanges] Error in submit button handler: $e");
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error reporting changes: $e'),
+                          backgroundColor: Colors.red,
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  Future<void> _sendChangesToWeChat({
+    required String changes,
+    required String notifyPeople,
+    required String documentName,
+    required String workspaceId,
+    required String viewId,
+  }) async {
+    try {
+      Log.info("[ReportChanges] Starting webhook send process");
+      // WeChat webhook URL - replace with your actual webhook URL
+      const String webhookUrl = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=3950f1b7-fff4-4a9d-b82a-24cc2a7e579b';
+      
+      // Format current time
+      final now = DateTime.now();
+      final formattedTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+      Log.info("[ReportChanges] Formatted time: $formattedTime");
+      
+      // Get current user name from userProfilePB in DocumentState
+      final userProfile = documentBloc.state.userProfilePB;
+      final editorName = userProfile != null ? userProfile.name : "Unknown User";
+      Log.info("[ReportChanges] Editor name: $editorName");
+      
+      // Generate app and web links
+      final appDocsUrl = 'appflowy-flutter://page-view?workspace_id=$workspaceId&view_id=$viewId';
+      final webDocsUrl = 'https://docs.uneedx.com/app/$workspaceId/$viewId';
+      Log.info("[ReportChanges] URLs: app=$appDocsUrl, web=$webDocsUrl");
+      
+      // Prepare message content in Markdown format
+      final markdownContent = '''
+#### 有人修改了文档
+> **文档标题：** $documentName
+> **修改时间：** $formattedTime
+> **修改者：** $editorName
+> **APP 链接：** [点击查看]($appDocsUrl)
+> **WEB 链接：** [点击查看]($webDocsUrl)
+
+**修改内容：** $changes
+${notifyPeople.isNotEmpty ? '**需要通知：** $notifyPeople' : ''}
+''';
+      
+      // Prepare message content
+      final message = {
+        'msgtype': 'markdown',
+        'markdown': {
+          'content': markdownContent,
+        }
+      };
+      
+      Log.info("[ReportChanges] Sending HTTP POST request to webhook");
+      // Send POST request
+      final response = await http.post(
+        Uri.parse(webhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(message),
+      );
+      
+      Log.info("[ReportChanges] HTTP response status: ${response.statusCode}");
+      Log.info("[ReportChanges] HTTP response body: ${response.body}");
+      
+      if (response.statusCode != 200) {
+        Log.error('Failed to send notification: ${response.body}');
+      } else {
+        Log.info("[ReportChanges] Successfully sent notification");
+      }
+    } catch (e) {
+      Log.error("[ReportChanges] Error sending notification: $e");
+      // 重新抛出异常，以便上层处理
+      rethrow;
+    }
   }
 
   void onNotificationAction(

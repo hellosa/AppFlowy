@@ -10,6 +10,7 @@ import 'package:appflowy/startup/tasks/deeplink/expire_login_deeplink_handler.da
 import 'package:appflowy/startup/tasks/deeplink/invitation_deeplink_handler.dart';
 import 'package:appflowy/startup/tasks/deeplink/login_deeplink_handler.dart';
 import 'package:appflowy/startup/tasks/deeplink/open_app_deeplink_handler.dart';
+import 'package:appflowy/startup/tasks/deeplink/page_view_deeplink_handler.dart';
 import 'package:appflowy/startup/tasks/deeplink/payment_deeplink_handler.dart';
 import 'package:appflowy/user/application/auth/auth_error.dart';
 import 'package:appflowy/user/application/user_auth_listener.dart';
@@ -30,6 +31,7 @@ class AppFlowyCloudDeepLink {
       ..register(PaymentDeepLinkHandler())
       ..register(InvitationDeepLinkHandler())
       ..register(ExpireLoginDeepLinkHandler())
+      ..register(PageViewDeepLinkHandler())
       ..register(OpenAppDeepLinkHandler());
 
     _deepLinkSubscription = _AppLinkWrapper.instance.listen(
@@ -141,6 +143,17 @@ class AppFlowyCloudDeepLink {
             _completer?.complete(result);
             completer = null;
           }
+        } else if (handler is PageViewDeepLinkHandler) {
+          // Handle page view deep link results
+          result.onFailure((error) {
+            final context = AppGlobals.rootNavKey.currentState?.context;
+            if (context != null) {
+              showToastNotification(
+                message: 'Failed to navigate to page: ${error.msg}',
+                type: ToastificationType.error,
+              );
+            }
+          });
         } else if (handler is ExpireLoginDeepLinkHandler) {
           result.onFailure(
             (error) {
