@@ -193,7 +193,14 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
         }
       },
       syncStateChanged: (syncState) {
-        emit(state.copyWith(syncState: syncState.value));
+        DateTime? lastSyncTime = state.lastSyncTime;
+        if (syncState.value == DocumentSyncState.SyncFinished) {
+          lastSyncTime = DateTime.now();
+        }
+        emit(state.copyWith(
+          syncState: syncState.value,
+          lastSyncTime: lastSyncTime,
+        ));
       },
       clearAwarenessStates: () async {
         // sync a null selection and a null meta to clear the awareness states
@@ -476,6 +483,7 @@ class DocumentState with _$DocumentState {
     EditorState? editorState,
     FlowyError? error,
     @Default(null) DocumentAwarenessStatesPB? awarenessStates,
+    DateTime? lastSyncTime,
   }) = _DocumentState;
 
   factory DocumentState.initial() => const DocumentState(

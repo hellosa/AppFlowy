@@ -25,6 +25,7 @@ import 'package:appflowy_backend/dispatch/dispatch.dart';
 import 'package:appflowy_backend/log.dart';
 import 'package:appflowy_backend/protobuf/flowy-folder/view.pb.dart';
 import 'package:appflowy_backend/protobuf/flowy-user/protobuf.dart';
+import 'package:appflowy_backend/protobuf/flowy-document/entities.pb.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -291,17 +292,60 @@ class _DocumentPageState extends State<DocumentPage>
   }
 
   Widget _buildReportChangesButton(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 20.0),
-      alignment: Alignment.centerRight,
-      child: ElevatedButton(
-        onPressed: () => _showReportChangesDialog(context),
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0),
-          minimumSize: const Size(100, 32),
-        ),
-        child: const Text('Report Changes'),
-      ),
+    return BlocBuilder<DocumentBloc, DocumentState>(
+      builder: (context, state) {
+        final lastSyncTime = state.lastSyncTime;
+        final syncState = state.syncState;
+        
+        // 格式化同步时间显示
+        String syncTimeText = '';
+        if (lastSyncTime != null) {
+          final now = DateTime.now();
+          final difference = now.difference(lastSyncTime);
+          
+          if (difference.inMinutes < 1) {
+            syncTimeText = '刚刚同步成功';
+          } else if (difference.inMinutes < 60) {
+            syncTimeText = '${difference.inMinutes}分钟前同步成功';
+          } else if (difference.inHours < 24) {
+            syncTimeText = '${difference.inHours}小时前同步成功';
+          } else {
+            final days = difference.inDays;
+            syncTimeText = '${days}天前同步成功';
+          }
+        } else if (syncState == DocumentSyncState.Syncing) {
+          syncTimeText = '正在同步...';
+        } else {
+          syncTimeText = '尚未同步';
+        }
+        
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 20.0),
+          alignment: Alignment.centerRight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                syncTimeText,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 4),
+              ElevatedButton(
+                onPressed: () => _showReportChangesDialog(context),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  minimumSize: const Size(100, 32),
+                ),
+                child: const Text('Report Changes'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
