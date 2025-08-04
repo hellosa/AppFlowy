@@ -8,6 +8,7 @@ import 'package:appflowy/plugins/document/application/document_appearance_cubit.
 import 'package:appflowy/plugins/document/document_page.dart';
 import 'package:appflowy/plugins/document/presentation/document_collaborators.dart';
 import 'package:appflowy/plugins/shared/share/share_button.dart';
+import 'package:appflowy/plugins/shared/notify/notify_button.dart';
 import 'package:appflowy/plugins/util.dart';
 import 'package:appflowy/shared/feature_flags.dart';
 import 'package:appflowy/shared/icon_emoji_picker/tab.dart';
@@ -212,6 +213,11 @@ class DocumentPluginWidgetBuilder extends PluginWidgetBuilder
               : [const HSpace(8)],
           ShareButton(
             key: ValueKey('share_button_${view.id}'),
+            view: view,
+          ),
+          const HSpace(8),
+          NotifyButton(
+            key: ValueKey('notify_button_${view.id}'),
             view: view,
           ),
           const HSpace(10),
